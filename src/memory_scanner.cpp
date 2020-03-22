@@ -1,0 +1,151 @@
+#include "sentinel/memory/scanner.h"
+#include "sentinel/core/error.h"
+#include "sentinel/utils/logger.h"
+#include <cstring>
+#include <cstdlib>
+#include <cctype>
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+#include <TlHelp32.h>
+#endif
+
+int sentinel_scan_init_result(sentinel_scan_result_t* result, usize cap) {
+    if (!result) return SENTINEL_ERROR_INVALID_PARAMETER;
+    result->matches = (sentinel_match_t*)calloc(cap, sizeof(sentinel_match_t));
+    if (!result->matches) return SENTINEL_ERROR_OUT_OF_MEMORY;
+    result->count = 0;
+    result->capacity = cap;
+    return SENTINEL_OK;
+}
+
+void sentinel_scan_free_result(sentinel_scan_result_t* result) {
+    if (result && result->matches) {
+        free(result->matches);
+        result->matches = nullptr;
+        result->count = 0;
+        result->capacity = 0;
+    }
+}
+
+static int add_match(sentinel_scan_result_t* r, sentinel_addr_t addr, usize off) {
+    if (r->count >= r->capacity) {
+        usize nc = r->capacity * 2;
+        sentinel_match_t* nm = (sentinel_match_t*)realloc(r->matches, nc * sizeof(sentinel_match_t));
+        if (!nm) return SENTINEL_ERROR_OUT_OF_MEMORY;
+        r->matches = nm;
+        r->capacity = nc;
+    }
+    r->matches[r->count].address = addr;
+    r->matches[r->count].offset = off;
+    r->matches[r->count].confidence = 1.0f;
+    r->count++;
+    return SENTINEL_OK;
+}
+
+int sentinel_parse_ida_pattern(const char* pattern, u8* bytes, u8* mask, usize* out_len) {
+    if (!pattern || !bytes || !mask || !out_len) return SENTINEL_ERROR_INVALID_PARAMETER;
+    usize len = 0;
+    const char* p = pattern;
+    while (*p && len < SENTINEL_MAX_PATTERN_LEN) {
+        while (*p == ' ') p++;
+        if (!*p) break;
+        if (*p == '?') {
+            bytes[len] = 0; mask[len] = 0; len++;
+            p++; if (*p == '?') p++;
+        } else {
+            char hex[3] = {0};
+            hex[0] = *p++;
+            if (*p && *p != ' ') hex[1] = *p++;
+            bytes[len] = (u8)strtoul(hex, nullptr, 16);
+            mask[len] = 0xFF; len++;
+        }
+    }
+    *out_len = len;
+    return SENTINEL_OK;
+}
+
+int sentinel_scan_bytes(const u8* haystack, usize haystack_size,
+                        const u8* needle, usize needle_size,
+                        const u8* mask, sentinel_scan_result_t* result) {
+    if (!haystack || !needle || !result) return SENTINEL_ERROR_INVALID_PARAMETER;
+    if (needle_size == 0 || needle_size > haystack_size) return SENTINEL_OK;
+    for (usize i = 0; i <= haystack_size - needle_size; i++) {
+        bool found = true;
+        for (usize j = 0; j < needle_size; j++) {
+            u8 m = mask ? mask[j] : 0xFF;
+            if ((haystack[i+j] & m) != (needle[j] & m)) { found = false; break; }
+        }
+        if (found) {
+            int rc = add_match(result, (sentinel_addr_t)(haystack + i), i);
+            if (rc != SENTINEL_OK) return rc;
+        }
+    }
+    return SENTINEL_OK;
+}
+
+#ifdef _WIN32
+int sentinel_scan_pattern(sentinel_pid_t pid, const char* pattern,
+                          const sentinel_scan_config_t* config,
+                          sentinel_scan_result_t* result) {
+    if (!pattern || !result) return SENTINEL_ERROR_INVALID_PARAMETER;
+    u8 bytes[SENTINEL_MAX_PATTERN_LEN], mask[SENTINEL_MAX_PATTERN_LEN];
+    usize pat_len = 0;
+    int rc = sentinel_parse_ida_pattern(pattern, bytes, mask, &pat_len);
+    if (rc != SENTINEL_OK) return rc;
+
+    HANDLE proc = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, pid);
+    if (!proc) return SENTINEL_ERROR_PROCESS_NOT_FOUND;
+
+    sentinel_addr_t addr = config ? config->start_address : 0;
+    sentinel_addr_t end_addr = config ? config->end_address : 0x7FFFFFFFFFFF;
+
+    MEMORY_BASIC_INFORMATION mbi;
+    while (addr < end_addr && VirtualQueryEx(proc, (LPCVOID)addr, &mbi, sizeof(mbi))) {
+        if (mbi.State == MEM_COMMIT && !(mbi.Protect & PAGE_NOACCESS) &&
+            !(mbi.Protect & PAGE_GUARD)) {
+            u8* buf = (u8*)malloc(mbi.RegionSize);
+            if (buf) {
+                SIZE_T bytesread = 0;
+                if (ReadProcessMemory(proc, mbi.BaseAddress, buf, mbi.RegionSize, &bytesread)) {
+                    for (usize i = 0; i + pat_len <= bytesread; i++) {
+                        bool match = true;
+                        for (usize j = 0; j < pat_len; j++) {
+                            if ((buf[i+j] & mask[j]) != (bytes[j] & mask[j])) {
+                                match = false; break;
+                            }
+                        }
+                        if (match)
+                            add_match(result, (sentinel_addr_t)mbi.BaseAddress + i, i);
+                    }
+                }
+                free(buf);
+            }
+        }
+        addr = (sentinel_addr_t)mbi.BaseAddress + mbi.RegionSize;
+    }
+    CloseHandle(proc);
+    return SENTINEL_OK;
+}
+#else
+int sentinel_scan_pattern(sentinel_pid_t pid, const char* pattern,
+                          const sentinel_scan_config_t* config,
+                          sentinel_scan_result_t* result) {
+    (void)pid; (void)pattern; (void)config; (void)result;
+    return SENTINEL_ERROR_UNSUPPORTED;
+}
+#endif
+
+namespace sentinel { namespace memory {
+Scanner::Scanner() : config_{}, result_{} { sentinel_scan_init_result(&result_, 64); }
+Scanner::~Scanner() { sentinel_scan_free_result(&result_); }
+void Scanner::set_target(sentinel_pid_t pid) { config_.target_pid = pid; }
+void Scanner::set_range(sentinel_addr_t s, sentinel_addr_t e) { config_.start_address = s; config_.end_address = e; }
+void Scanner::set_alignment(u32 a) { config_.alignment = a; }
+int Scanner::scan(const char* pat) { return sentinel_scan_pattern(config_.target_pid, pat, &config_, &result_); }
+usize Scanner::match_count() const { return result_.count; }
+const sentinel_match_t* Scanner::matches() const { return result_.matches; }
+sentinel_addr_t Scanner::first_match() const { return result_.count > 0 ? result_.matches[0].address : 0; }
+void Scanner::reset() { result_.count = 0; }
+}}
