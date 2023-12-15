@@ -32,3 +32,9 @@ endif()
 
 install(TARGETS sentinel ARCHIVE DESTINATION lib)
 install(DIRECTORY include/sentinel DESTINATION include)
+
+# Tools
+if(SENTINEL_BUILD_TOOLS)
+    add_executable(sig_scan tools/sig_scan.cpp)
+    target_link_libraries(sig_scan sentinel)
+endif()
