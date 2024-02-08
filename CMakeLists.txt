@@ -38,3 +38,8 @@ if(SENTINEL_BUILD_TOOLS)
     add_executable(sig_scan tools/sig_scan.cpp)
     target_link_libraries(sig_scan sentinel)
 endif()
+
+if(SENTINEL_BUILD_TOOLS)
+    add_executable(ac_probe tools/ac_probe.cpp)
+    target_link_libraries(ac_probe sentinel)
+endif()
