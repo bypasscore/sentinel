@@ -43,3 +43,11 @@ if(SENTINEL_BUILD_TOOLS)
     add_executable(ac_probe tools/ac_probe.cpp)
     target_link_libraries(ac_probe sentinel)
 endif()
+
+# Examples
+if(SENTINEL_BUILD_EXAMPLES)
+    add_executable(basic_scan examples/basic_scan.cpp)
+    target_link_libraries(basic_scan sentinel)
+    add_executable(driver_comm_example examples/driver_comm.cpp)
+    target_link_libraries(driver_comm_example sentinel)
+endif()
