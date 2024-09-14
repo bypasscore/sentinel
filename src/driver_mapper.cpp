@@ -152,3 +152,28 @@ int sentinel_driver_map_file(const char* driver_path,
 int sentinel_driver_map(const u8* d, usize s, const sentinel_mapper_config_t* c, sentinel_addr_t* b) { (void)d;(void)s;(void)c;(void)b; return SENTINEL_ERROR_UNSUPPORTED; }
 int sentinel_driver_map_file(const char* p, const sentinel_mapper_config_t* c, sentinel_addr_t* b) { (void)p;(void)c;(void)b; return SENTINEL_ERROR_UNSUPPORTED; }
 #endif
+
+#ifdef _WIN32
+/*
+ * Fix: Windows 11 with VBS/HVCI enabled causes driver mapper to crash
+ * because code integrity enforcement rejects unsigned memory-mapped code.
+ * Added VBS detection and graceful error reporting.
+ */
+int sentinel_driver_map_safe(const u8* driver_data, usize driver_size,
+                              const sentinel_mapper_config_t* config,
+                              sentinel_addr_t* mapped_base) {
+    if (sentinel_is_vbs_enabled()) {
+        SLOG_ERROR("VBS/HVCI is enabled - manual driver mapping is blocked by code integrity");
+        return SENTINEL_ERROR_VBS_ENABLED;
+    }
+
+    /* Check Windows version - Win11 22H2+ has additional mitigations */
+    sentinel_os_version_t ver = {};
+    sentinel_get_os_version(&ver);
+    if (ver.build >= 22621) {
+        SLOG_WARN("Windows 11 22H2+ detected (build %u) - additional kernel mitigations active", ver.build);
+    }
+
+    return sentinel_driver_map(driver_data, driver_size, config, mapped_base);
+}
+#endif
