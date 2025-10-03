@@ -190,3 +190,95 @@ int sentinel_scan_bytes_optimized(const u8* haystack, usize haystack_size,
     }
     return SENTINEL_OK;
 }
+
+/*
+ * SSE4.2-optimized pattern scanner using PCMPESTRI for fast byte matching.
+ * Falls back to the scalar implementation on non-SSE4.2 hardware.
+ */
+#if defined(__SSE4_2__) || defined(_MSC_VER)
+
+#ifdef _MSC_VER
+#include <intrin.h>
+#include <nmmintrin.h>
+#else
+#include <x86intrin.h>
+#endif
+
+static bool has_sse42(void) {
+    int info[4];
+#ifdef _MSC_VER
+    __cpuid(info, 1);
+#else
+    __cpuid(1, info[0], info[1], info[2], info[3]);
+#endif
+    return (info[2] & (1 << 20)) != 0;
+}
+
+int sentinel_scan_bytes_simd(const u8* haystack, usize haystack_size,
+                              const u8* needle, usize needle_size,
+                              const u8* mask, sentinel_scan_result_t* result) {
+    if (!haystack || !needle || !result) return SENTINEL_ERROR_INVALID_PARAMETER;
+    if (needle_size == 0 || needle_size > haystack_size) return SENTINEL_OK;
+    if (needle_size > 16 || !has_sse42()) {
+        /* Fall back to scalar for patterns > 16 bytes or no SSE4.2 */
+        return sentinel_scan_bytes(haystack, haystack_size, needle, needle_size, mask, result);
+    }
+
+    /* Check if pattern has wildcards -- if so, use scalar */
+    bool has_wildcards = false;
+    if (mask) {
+        for (usize i = 0; i < needle_size; i++) {
+            if (mask[i] != 0xFF) { has_wildcards = true; break; }
+        }
+    }
+    if (has_wildcards) {
+        return sentinel_scan_bytes(haystack, haystack_size, needle, needle_size, mask, result);
+    }
+
+    /* Use _mm_cmpestrm for exact byte matching with SSE4.2 */
+    __m128i pattern = _mm_loadu_si128((const __m128i*)needle);
+    int pattern_len = (int)needle_size;
+
+    for (usize i = 0; i + 16 <= haystack_size; i += 16) {
+        __m128i chunk = _mm_loadu_si128((const __m128i*)(haystack + i));
+        int idx = _mm_cmpestri(pattern, pattern_len, chunk, 16,
+                               _SIDD_UBYTE_OPS | _SIDD_CMP_EQUAL_ORDERED |
+                               _SIDD_LEAST_SIGNIFICANT);
+        if (idx < 16) {
+            /* Potential match at i + idx, verify full pattern */
+            usize pos = i + idx;
+            if (pos + needle_size <= haystack_size) {
+                bool match = true;
+                for (usize j = 0; j < needle_size; j++) {
+                    if (haystack[pos + j] != needle[j]) { match = false; break; }
+                }
+                if (match) {
+                    add_match(result, (sentinel_addr_t)(haystack + pos), pos);
+                }
+            }
+            /* Continue scanning from idx+1 within this chunk */
+            if (idx + 1 < 16) i -= (16 - idx - 1);
+        }
+    }
+
+    /* Handle the tail that does not fit a full 16-byte chunk */
+    usize tail_start = (haystack_size / 16) * 16;
+    if (tail_start > 0) tail_start -= needle_size;
+    for (usize i = tail_start; i + needle_size <= haystack_size; i++) {
+        bool match = true;
+        for (usize j = 0; j < needle_size; j++) {
+            if (haystack[i + j] != needle[j]) { match = false; break; }
+        }
+        if (match) add_match(result, (sentinel_addr_t)(haystack + i), i);
+    }
+
+    return SENTINEL_OK;
+}
+
+#else
+int sentinel_scan_bytes_simd(const u8* haystack, usize haystack_size,
+                              const u8* needle, usize needle_size,
+                              const u8* mask, sentinel_scan_result_t* result) {
+    return sentinel_scan_bytes(haystack, haystack_size, needle, needle_size, mask, result);
+}
+#endif
