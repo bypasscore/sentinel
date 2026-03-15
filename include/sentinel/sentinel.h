@@ -1,10 +1,10 @@
 #ifndef SENTINEL_H
 #define SENTINEL_H
 
-#define SENTINEL_VERSION_MAJOR 1
-#define SENTINEL_VERSION_MINOR 0
+#define SENTINEL_VERSION_MAJOR 3
+#define SENTINEL_VERSION_MINOR 2
 #define SENTINEL_VERSION_PATCH 0
-#define SENTINEL_VERSION_STRING "1.0.0"
+#define SENTINEL_VERSION_STRING "3.2.0"
 
 #include "core/types.h"
 #include "core/error.h"
