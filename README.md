@@ -130,6 +130,14 @@ Findings from this research have been responsibly disclosed to anti-cheat vendor
 
 This framework exists to advance the understanding of game security. Use it only on systems you own or have authorization to test, for legitimate security research, and in compliance with all applicable laws. **Never** use this to create cheats or circumvent protections on live services.
 
+## Contact
+
+Need custom anti-cheat research, detection analysis, or enterprise licensing?
+
+- **Email:** [contact@bypasscore.com](mailto:contact@bypasscore.com)
+- **Telegram:** [@bypasscore](https://t.me/bypasscore)
+- **Web:** [bypasscore.com](https://bypasscore.com)
+
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
