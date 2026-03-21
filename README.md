@@ -142,7 +142,16 @@ Need custom anti-cheat research, detection analysis, or enterprise licensing?
 
 Help keep BypassCore open-source and independent.
 
-**USDT (Polygon):** `0xd0f38b51496bee61ea5e9e56e2c414b607ab011a`
+| Network | Address |
+|---------|---------|
+| **Polygon** | `0xd0f38b51496bee61ea5e9e56e2c414b607ab011a` |
+| **Ethereum** | `0xd0f38b51496bee61ea5e9e56e2c414b607ab011a` |
+| **BSC** | `0xd0f38b51496bee61ea5e9e56e2c414b607ab011a` |
+| **Arbitrum** | `0xd0f38b51496bee61ea5e9e56e2c414b607ab011a` |
+| **Optimism** | `0xd0f38b51496bee61ea5e9e56e2c414b607ab011a` |
+| **Avalanche** | `0xd0f38b51496bee61ea5e9e56e2c414b607ab011a` |
+
+USDT / USDC / ETH / BNB accepted on all networks.
 
 ## License
 
